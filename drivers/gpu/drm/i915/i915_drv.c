@@ -78,6 +78,10 @@
 #include "intel_csr.h"
 #include "intel_pm.h"
 
+#if IS_ENABLED(CONFIG_DRM_I915_GVT)
+#include "gvt.h"
+#endif
+
 static struct drm_driver driver;
 
 struct vlv_s0ix_state {
@@ -1801,6 +1805,11 @@ static int i915_drm_suspend(struct drm_device *dev)
 
 	drm_kms_helper_poll_disable(dev);
 
+#if IS_ENABLED(CONFIG_DRM_I915_GVT)
+	if (dev_priv->gvt)
+		intel_gvt_pm_suspend(dev_priv->gvt);
+#endif
+
 	pci_save_state(pdev);
 
 	intel_display_suspend(dev);
@@ -1987,6 +1996,12 @@ static int i915_drm_resume(struct drm_device *dev)
 
 	intel_power_domains_enable(dev_priv);
 
+#if IS_ENABLED(CONFIG_DRM_I915_GVT)
+	if (dev_priv->gvt) {
+		return intel_gvt_pm_resume(dev_priv->gvt);
+	}
+#endif
+
 	enable_rpm_wakeref_asserts(&dev_priv->runtime_pm);
 
 	return 0;
@@ -2063,6 +2078,16 @@ static int i915_drm_resume_early(struct drm_device *dev)
 	i915_rc6_ctx_wa_resume(dev_priv);
 
 	intel_gt_sanitize(&dev_priv->gt, true);
+
+#if IS_ENABLED(CONFIG_DRM_I915_GVT)
+	if (!ret) {
+		if (dev_priv->gvt) {
+			ret = intel_gvt_pm_early_resume(dev_priv->gvt);
+			if (ret)
+				return ret;
+		}
+	}
+#endif
 
 	enable_rpm_wakeref_asserts(&dev_priv->runtime_pm);
 
@@ -2728,6 +2753,16 @@ static int intel_runtime_resume(struct device *kdev)
 		intel_hpd_init(dev_priv);
 
 	intel_enable_ipc(dev_priv);
+
+#if IS_ENABLED(CONFIG_DRM_I915_GVT)
+	if (!ret) {
+		if (dev_priv->gvt) {
+			ret = intel_gvt_pm_early_resume(dev_priv->gvt);
+			if (ret)
+				return ret;
+		}
+	}
+#endif
 
 	enable_rpm_wakeref_asserts(rpm);
 
