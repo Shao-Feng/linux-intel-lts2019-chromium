@@ -1658,13 +1658,13 @@ static int pvinfo_mmio_write(struct intel_vgpu *vgpu, unsigned int offset,
 
 			intel_vgpu_display_set_foreground(vgpu, true);
 			if (!foreground && READ_ONCE(gvt->disp_auto_switch)) {
-				u32 owner = 0;
+				u64 owner = 0;
 
 				mutex_lock(&gvt->sw_in_progress);
 				owner = intel_vgpu_display_find_owner(vgpu, false, false);
 				if (owner != gvt->disp_owner) {
 					gvt->disp_owner = owner;
-					gvt_dbg_dpy("Schedule display owner changed to 0x%08x "
+					gvt_dbg_dpy("Schedule display owner changed to 0x%016llx "
 						    "due to DISPLAY_READY of vGPU-%d\n",
 						    gvt->disp_owner, vgpu->id);
 					queue_work(system_unbound_wq,

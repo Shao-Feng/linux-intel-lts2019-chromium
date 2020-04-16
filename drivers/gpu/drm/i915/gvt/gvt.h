@@ -396,7 +396,7 @@ struct intel_gvt {
 	struct work_struct switch_display_work;
 
 	/*
-	 * Available display port mask for PORT_A to PORT_A+7 (low to high).
+	 * Available display port mask for PORT_A to I915_MAX_PORTS (low to high).
 	 * Each hex digit represents the availability of corresponding port.
 	 * 0: Port isn't available.
 	 * x: Port x is available.
@@ -407,7 +407,7 @@ struct intel_gvt {
 	 *      PORT_C: Available.
 	 *      PORT_D: Available.
 	 */
-	u32 avail_disp_port_mask;
+	u64 avail_disp_port_mask;
 
 	/*
 	 * Bit mask of selected ports for vGPU-1 to vGPU-8 (low to high).
@@ -425,7 +425,7 @@ struct intel_gvt {
 	u64 sel_disp_port_mask;
 
 	/*
-	 * Display owner for PORT_A to PORT_A+7 (low to high).
+	 * Display owner for PORT_A to I915_MAX_PORTS (low to high).
 	 * Each hex digit represents the owner vGPU id of corresponding port.
 	 * 0: display N/A or owned by host.
 	 * x: display owned by vGPU x.
@@ -435,7 +435,7 @@ struct intel_gvt {
 	 *      PORT_C: N/A or owned by host.
 	 *      PORT_D: Owned by vGPU-2.
 	 */
-	u32 disp_owner;
+	u64 disp_owner;
 
 	/*
 	 * Auto switch disp, it contains:
@@ -801,17 +801,18 @@ void intel_gvt_debugfs_clean(struct intel_gvt *gvt);
 
 u8 intel_gvt_external_disp_id_from_port(enum port port);
 enum port intel_gvt_port_from_external_disp_id(u8 port_id);
+u64 intel_gvt_port_to_mask_bit(u8 port_sel, enum port port);
 enum pipe intel_gvt_pipe_from_port(
 	struct drm_i915_private *dev_priv, enum port port);
 enum port intel_gvt_port_from_pipe(
 	struct drm_i915_private *dev_priv, enum pipe pipe);
 void intel_gvt_store_vgpu_display_owner(
-	struct drm_i915_private *dev_priv, u32 disp_owner);
+	struct drm_i915_private *dev_priv, u64 disp_owner);
 void intel_gvt_store_vgpu_display_mask(struct drm_i915_private *dev_priv,
 				       u64 mask);
 void intel_gvt_store_vgpu_display_switch(struct drm_i915_private *dev_priv,
 					 bool auto_switch);
-u32 intel_vgpu_display_find_owner(struct intel_vgpu *vgpu, bool reset, bool next);
+u64 intel_vgpu_display_find_owner(struct intel_vgpu *vgpu, bool reset, bool next);
 void intel_vgpu_display_set_foreground(struct intel_vgpu *vgpu, bool reset);
 
 void intel_gvt_init_display(struct intel_gvt *gvt);

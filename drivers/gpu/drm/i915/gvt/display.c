@@ -674,7 +674,7 @@ static void intel_gvt_connector_change_work(struct work_struct *w)
 
 	if (!idr_is_empty(&gvt->vgpu_idr)) {
 		mutex_unlock(&gvt->lock);
-		gvt_dbg_dpy("Available port mask %08x and selected mask 0x%016llx "
+		gvt_dbg_dpy("Available port mask %016llx and selected mask 0x%016llx "
 			    "unchanged due to hotplug after vGPU creation\n",
 			    gvt->avail_disp_port_mask, gvt->sel_disp_port_mask);
 		return;
@@ -691,7 +691,7 @@ static void intel_gvt_connector_change_work(struct work_struct *w)
 
 		port_ext = intel_gvt_external_disp_id_from_port(port);
 		// Available port is set in corresponding port position.
-		gvt->avail_disp_port_mask |= (port_ext << port * 4);
+		gvt->avail_disp_port_mask |= intel_gvt_port_to_mask_bit(port_ext, port);
 		// Available port is assigned to vGPU in sequence.
 		gvt->sel_disp_port_mask |= ((1 << port) << id * 8);
 		++id;
@@ -1069,6 +1069,16 @@ enum port intel_gvt_port_from_external_disp_id(u8 port_id)
 	if (port_id)
 		port = (enum port)(port_id - 1);
 	return port;
+}
+
+u64 intel_gvt_port_to_mask_bit(u8 port_sel, enum port port)
+{
+	if (port > PORT_A + 15) {
+		gvt_err("PORT_%c exceeds maximum that can be held in u64\n",
+			port_name(port));
+		return 0;
+	}
+	return ((u64)port_sel << port * 4);
 }
 
 enum pipe intel_gvt_pipe_from_port(struct drm_i915_private *dev_priv,
@@ -2151,7 +2161,7 @@ static void intel_gvt_switch_display_work(struct work_struct *w)
 }
 
 void intel_gvt_store_vgpu_display_owner(struct drm_i915_private *dev_priv,
-					u32 disp_owner)
+					u64 disp_owner)
 {
 	struct intel_gvt *gvt = dev_priv->gvt;
 	struct intel_vgpu *vgpu = NULL;
@@ -2159,7 +2169,7 @@ void intel_gvt_store_vgpu_display_owner(struct drm_i915_private *dev_priv,
 	enum pipe pipe = INVALID_PIPE;
 	enum port port = PORT_NONE;
 	u8 owner;
-	u32 owner_mask = 0;
+	u64 owner_mask = 0;
 	bool valid_owner = true, vgpu_found;
 
 	mutex_lock(&gvt->lock);
@@ -2200,7 +2210,6 @@ void intel_gvt_store_vgpu_display_owner(struct drm_i915_private *dev_priv,
 
 		if (owner != 0) {
 			if (vgpu_found) {
-				// port_assign = intel_gvt_external_disp_id_from_port(port);
 				if (!(((gvt->sel_disp_port_mask >> (owner - 1) * 8) & 0xFF) & (1 << port))) {
 					gvt_err("PORT_%c(%d) isn't assigned to vGPU-%d\n",
 						port_name(port),
@@ -2268,11 +2277,11 @@ void intel_gvt_store_vgpu_display_mask(struct drm_i915_private *dev_priv,
 			mask_vgpu = (mask >> id * 8) & 0xFF;
 			if (mask_vgpu == 0)
 				continue;
-			for (port = PORT_A; port < I915_MAX_PORTS; port++) {
+			for (port = PORT_A; port < (PORT_A + 8); port++) {
 				if (mask_vgpu & (1 << port)) {
 					port_sel = intel_gvt_external_disp_id_from_port(port);
 					if (port_sel == 0 ||
-					    !(gvt->avail_disp_port_mask & (port_sel << port * 4))) {
+					    !(gvt->avail_disp_port_mask & intel_gvt_port_to_mask_bit(port_sel, port))) {
 						gvt_err("Selected PORT_%c for vGPU-%d isn't available\n",
 							port_name(port), id + 1);
 						valid_mask = false;
@@ -2350,7 +2359,7 @@ void intel_gvt_store_vgpu_display_switch(struct drm_i915_private *dev_priv,
  *    The common usage is to switch display to next vGPU on receiving deactivate
  *    or DMLR.
  */
-u32 intel_vgpu_display_find_owner(struct intel_vgpu *vgpu, bool reset, bool next)
+u64 intel_vgpu_display_find_owner(struct intel_vgpu *vgpu, bool reset, bool next)
 {
 	struct intel_gvt *gvt = vgpu->gvt;
 	struct intel_vgpu *other_v;
@@ -2358,7 +2367,8 @@ u32 intel_vgpu_display_find_owner(struct intel_vgpu *vgpu, bool reset, bool next
 	struct intel_vgpu_display_path *disp_path = NULL, *n;
 	enum pipe pipe = INVALID_PIPE;
 	enum port port = PORT_NONE;
-	u32 id, owner_id, available, new, candidate;
+	u32 id, owner_id, available, candidate;
+	u64 new;
 	bool found = false;
 
 	new = gvt->disp_owner;
