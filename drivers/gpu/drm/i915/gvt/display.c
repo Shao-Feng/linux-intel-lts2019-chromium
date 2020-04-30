@@ -809,6 +809,7 @@ static void direct_display_init_d0_regs(struct intel_gvt *gvt, enum pipe pipe)
 	struct intel_runtime_info *runtime = RUNTIME_INFO(dev_priv);
 	struct intel_dom0_pipe_regs *pipe_regs = NULL;
 	struct intel_dom0_plane_regs *plane_regs = NULL;
+	struct prec_pal_data *pal_data = NULL;
 	enum plane_id plane;
 	int i, level, max_level, scaler, max_scaler = 0;
 	unsigned long irqflags;
@@ -845,6 +846,21 @@ static void direct_display_init_d0_regs(struct intel_gvt *gvt, enum pipe pipe)
 	for (i = 0; i < 256; i++) {
 		pipe_regs->lgc_palette[i] = I915_READ_FW(LGC_PALETTE(pipe, i));
 	}
+
+	// Set dirty for all d0 regs since i915 may not update all after BIOS.
+	pal_data = pipe_regs->prec_palette_split;
+	for (i = 0; i < PAL_PREC_INDEX_VALUE_MASK + 1; i++) {
+		I915_WRITE_FW(PREC_PAL_INDEX(pipe), i | PAL_PREC_SPLIT_MODE);
+		pal_data[i].val = I915_READ_FW(PREC_PAL_DATA(pipe));
+		pal_data[i].dirty = 1;
+	}
+	pal_data = pipe_regs->prec_palette_nonsplit;
+	for (i = 0; i < PAL_PREC_INDEX_VALUE_MASK + 1; i++) {
+		I915_WRITE_FW(PREC_PAL_INDEX(pipe), i);
+		pal_data[i].val = I915_READ_FW(PREC_PAL_DATA(pipe));
+		pal_data[i].dirty = 1;
+	}
+	I915_WRITE_FW(PREC_PAL_INDEX(pipe), 0);
 
 	for_each_universal_plane(dev_priv, pipe, plane) {
 		plane_regs = &gvt->pipe_info[pipe].plane_info[plane].dom0_regs;
@@ -2138,12 +2154,15 @@ void intel_gvt_flush_pipe_color(struct intel_gvt *gvt, enum pipe pipe,
 				struct intel_vgpu *vgpu)
 {
 	struct drm_i915_private *dev_priv = gvt->dev_priv;
-	int i;
+	struct intel_dom0_pipe_regs *pipe_regs =
+		&gvt->pipe_info[pipe].dom0_pipe_regs;
+	struct prec_pal_data *pal_data = NULL;
+	enum pipe v_pipe = INVALID_PIPE;
+	u32 gamma_mode = 0;
 
 	if (vgpu) {
 		struct intel_vgpu_display *disp_cfg = &vgpu->disp_cfg;
 		struct intel_vgpu_display_path *disp_path = NULL, *n;
-		enum pipe v_pipe = INVALID_PIPE;
 
 		list_for_each_entry_safe(disp_path, n, &disp_cfg->path_list, list) {
 			if (disp_path->p_pipe == pipe) {
@@ -2151,48 +2170,101 @@ void intel_gvt_flush_pipe_color(struct intel_gvt *gvt, enum pipe pipe,
 				break;
 			}
 		}
-		I915_WRITE_FW(SKL_BOTTOM_COLOR(pipe), vgpu_vreg_t(vgpu, SKL_BOTTOM_COLOR(v_pipe)));
-		I915_WRITE_FW(GAMMA_MODE(pipe), vgpu_vreg_t(vgpu, GAMMA_MODE(v_pipe)));
-		I915_WRITE_FW(PIPE_CSC_MODE(pipe), vgpu_vreg_t(vgpu, PIPE_CSC_MODE(v_pipe)));
-		I915_WRITE_FW(PIPE_CSC_PREOFF_HI(pipe), vgpu_vreg_t(vgpu, PIPE_CSC_PREOFF_HI(v_pipe)));
-		I915_WRITE_FW(PIPE_CSC_PREOFF_ME(pipe), vgpu_vreg_t(vgpu, PIPE_CSC_PREOFF_ME(v_pipe)));
-		I915_WRITE_FW(PIPE_CSC_PREOFF_LO(pipe), vgpu_vreg_t(vgpu, PIPE_CSC_PREOFF_LO(v_pipe)));
-		I915_WRITE_FW(PIPE_CSC_COEFF_RY_GY(pipe), vgpu_vreg_t(vgpu, PIPE_CSC_COEFF_RY_GY(v_pipe)));
-		I915_WRITE_FW(PIPE_CSC_COEFF_BY(pipe), vgpu_vreg_t(vgpu, PIPE_CSC_COEFF_BY(v_pipe)));
-		I915_WRITE_FW(PIPE_CSC_COEFF_RU_GU(pipe), vgpu_vreg_t(vgpu, PIPE_CSC_COEFF_RU_GU(v_pipe)));
-		I915_WRITE_FW(PIPE_CSC_COEFF_BU(pipe), vgpu_vreg_t(vgpu, PIPE_CSC_COEFF_BU(v_pipe)));
-		I915_WRITE_FW(PIPE_CSC_COEFF_RV_GV(pipe), vgpu_vreg_t(vgpu, PIPE_CSC_COEFF_RV_GV(v_pipe)));
-		I915_WRITE_FW(PIPE_CSC_COEFF_BV(pipe), vgpu_vreg_t(vgpu, PIPE_CSC_COEFF_BV(v_pipe)));
-		I915_WRITE_FW(PIPE_CSC_POSTOFF_HI(pipe), vgpu_vreg_t(vgpu, PIPE_CSC_POSTOFF_HI(v_pipe)));
-		I915_WRITE_FW(PIPE_CSC_POSTOFF_ME(pipe), vgpu_vreg_t(vgpu, PIPE_CSC_POSTOFF_ME(v_pipe)));
-		I915_WRITE_FW(PIPE_CSC_POSTOFF_LO(pipe), vgpu_vreg_t(vgpu, PIPE_CSC_POSTOFF_LO(v_pipe)));
-		for (i = 0; i < 256; i++) {
-			I915_WRITE_FW(LGC_PALETTE(pipe, i),
-				      vgpu_vreg_t(vgpu, LGC_PALETTE(v_pipe, i)));
-		}
-	} else {
-		struct intel_dom0_pipe_regs *pipe_regs =
-			&gvt->pipe_info[pipe].dom0_pipe_regs;
 
-		I915_WRITE_FW(SKL_BOTTOM_COLOR(pipe), pipe_regs->bottom_color);
-		I915_WRITE_FW(GAMMA_MODE(pipe), pipe_regs->gamma_mode);
-		I915_WRITE_FW(PIPE_CSC_MODE(pipe), pipe_regs->csc_mode);
-		I915_WRITE_FW(PIPE_CSC_PREOFF_HI(pipe), pipe_regs->csc_preoff_hi);
-		I915_WRITE_FW(PIPE_CSC_PREOFF_ME(pipe), pipe_regs->csc_preoff_me);
-		I915_WRITE_FW(PIPE_CSC_PREOFF_LO(pipe), pipe_regs->csc_preoff_lo);
-		I915_WRITE_FW(PIPE_CSC_COEFF_RY_GY(pipe), pipe_regs->csc_coeff_rygy);
-		I915_WRITE_FW(PIPE_CSC_COEFF_BY(pipe), pipe_regs->csc_coeff_by);
-		I915_WRITE_FW(PIPE_CSC_COEFF_RU_GU(pipe), pipe_regs->csc_coeff_rugu);
-		I915_WRITE_FW(PIPE_CSC_COEFF_BU(pipe), pipe_regs->csc_coeff_bu);
-		I915_WRITE_FW(PIPE_CSC_COEFF_RV_GV(pipe), pipe_regs->csc_coeff_rvgv);
-		I915_WRITE_FW(PIPE_CSC_COEFF_BV(pipe), pipe_regs->csc_coeff_bv);
-		I915_WRITE_FW(PIPE_CSC_POSTOFF_HI(pipe), pipe_regs->csc_postoff_hi);
-		I915_WRITE_FW(PIPE_CSC_POSTOFF_ME(pipe), pipe_regs->csc_postoff_me);
-		I915_WRITE_FW(PIPE_CSC_POSTOFF_LO(pipe), pipe_regs->csc_postoff_lo);
+		if (v_pipe == INVALID_PIPE)
+			return;
+
+		gamma_mode = vgpu_vreg_t(vgpu, GAMMA_MODE(v_pipe));
+		if ((gamma_mode & GAMMA_MODE_MODE_MASK) == GAMMA_MODE_MODE_SPLIT)
+			pal_data = disp_path->prec_palette_split;
+		else if ((gamma_mode & GAMMA_MODE_MODE_MASK) != GAMMA_MODE_MODE_8BIT)
+			pal_data = disp_path->prec_palette_nonsplit;
+	} else {
+		gamma_mode = pipe_regs->gamma_mode;
+		if ((gamma_mode & GAMMA_MODE_MODE_MASK) == GAMMA_MODE_MODE_SPLIT)
+			pal_data = pipe_regs->prec_palette_split;
+		else if ((gamma_mode & GAMMA_MODE_MODE_MASK) != GAMMA_MODE_MODE_8BIT)
+			pal_data = pipe_regs->prec_palette_nonsplit;
+	}
+
+	I915_WRITE_FW(SKL_BOTTOM_COLOR(pipe), vgpu ?
+		      vgpu_vreg_t(vgpu, SKL_BOTTOM_COLOR(v_pipe)) :
+		      pipe_regs->bottom_color);
+	I915_WRITE_FW(GAMMA_MODE(pipe), vgpu ?
+		      vgpu_vreg_t(vgpu, GAMMA_MODE(v_pipe)) :
+		      pipe_regs->gamma_mode);
+	I915_WRITE_FW(PIPE_CSC_MODE(pipe), vgpu ?
+		      vgpu_vreg_t(vgpu, PIPE_CSC_MODE(v_pipe)) :
+		      pipe_regs->csc_mode);
+	I915_WRITE_FW(PIPE_CSC_PREOFF_HI(pipe), vgpu ?
+		      vgpu_vreg_t(vgpu, PIPE_CSC_PREOFF_HI(v_pipe)) :
+		      pipe_regs->csc_preoff_hi);
+	I915_WRITE_FW(PIPE_CSC_PREOFF_ME(pipe), vgpu ?
+		      vgpu_vreg_t(vgpu, PIPE_CSC_PREOFF_ME(v_pipe)) :
+		      pipe_regs->csc_preoff_me);
+	I915_WRITE_FW(PIPE_CSC_PREOFF_LO(pipe), vgpu ?
+		      vgpu_vreg_t(vgpu, PIPE_CSC_PREOFF_LO(v_pipe)) :
+		      pipe_regs->csc_preoff_lo);
+	I915_WRITE_FW(PIPE_CSC_COEFF_RY_GY(pipe), vgpu ?
+		      vgpu_vreg_t(vgpu, PIPE_CSC_COEFF_RY_GY(v_pipe)) :
+		      pipe_regs->csc_coeff_rygy);
+	I915_WRITE_FW(PIPE_CSC_COEFF_BY(pipe), vgpu ?
+		      vgpu_vreg_t(vgpu, PIPE_CSC_COEFF_BY(v_pipe)) :
+		      pipe_regs->csc_coeff_by);
+	I915_WRITE_FW(PIPE_CSC_COEFF_RU_GU(pipe), vgpu ?
+		      vgpu_vreg_t(vgpu, PIPE_CSC_COEFF_RU_GU(v_pipe)) :
+		      pipe_regs->csc_coeff_rugu);
+	I915_WRITE_FW(PIPE_CSC_COEFF_BU(pipe), vgpu ?
+		      vgpu_vreg_t(vgpu, PIPE_CSC_COEFF_BU(v_pipe)) :
+		      pipe_regs->csc_coeff_bu);
+	I915_WRITE_FW(PIPE_CSC_COEFF_RV_GV(pipe), vgpu ?
+		      vgpu_vreg_t(vgpu, PIPE_CSC_COEFF_RV_GV(v_pipe)) :
+		      pipe_regs->csc_coeff_rvgv);
+	I915_WRITE_FW(PIPE_CSC_COEFF_BV(pipe), vgpu ?
+		      vgpu_vreg_t(vgpu, PIPE_CSC_COEFF_BV(v_pipe)) :
+		      pipe_regs->csc_coeff_bv);
+	I915_WRITE_FW(PIPE_CSC_POSTOFF_HI(pipe), vgpu ?
+		      vgpu_vreg_t(vgpu, PIPE_CSC_POSTOFF_HI(v_pipe)) :
+		      pipe_regs->csc_postoff_hi);
+	I915_WRITE_FW(PIPE_CSC_POSTOFF_ME(pipe), vgpu ?
+		      vgpu_vreg_t(vgpu, PIPE_CSC_POSTOFF_ME(v_pipe)) :
+		      pipe_regs->csc_postoff_me);
+	I915_WRITE_FW(PIPE_CSC_POSTOFF_LO(pipe), vgpu ?
+		      vgpu_vreg_t(vgpu, PIPE_CSC_POSTOFF_LO(v_pipe)) :
+		      pipe_regs->csc_postoff_lo);
+
+	// Set correct palette based on gamma mode
+	if ((gamma_mode & GAMMA_MODE_MODE_MASK) == GAMMA_MODE_MODE_8BIT) {
+		int i;
+
 		for (i = 0; i < 256; i++) {
-			I915_WRITE_FW(LGC_PALETTE(pipe, i),
+			I915_WRITE_FW(LGC_PALETTE(pipe, i), vgpu ?
+				      vgpu_vreg_t(vgpu, LGC_PALETTE(v_pipe, i)):
 				      pipe_regs->lgc_palette[i]);
 		}
+	} else {
+		int i;
+		u32 split = 0;
+
+		if ((gamma_mode & GAMMA_MODE_MODE_MASK) == GAMMA_MODE_MODE_SPLIT)
+			split |= PAL_PREC_SPLIT_MODE;
+
+		if (pal_data == NULL)
+			return;
+
+		for (i = 0; i < PAL_PREC_INDEX_VALUE_MASK + 1; i++) {
+			if (pal_data[i].dirty) {
+				I915_WRITE_FW(PREC_PAL_INDEX(pipe), i | split);
+				I915_WRITE_FW(PREC_PAL_DATA(pipe),
+					      pal_data[i].val);
+			}
+		}
+		/*
+		 * Reset PREC_PAL_INDEX, otherwise it prevents the legacy
+		 * palette to be written properly.
+		 */
+		I915_WRITE_FW(PREC_PAL_INDEX(pipe), 0);
+
 	}
 }
 
