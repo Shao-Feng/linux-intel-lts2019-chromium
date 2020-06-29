@@ -73,7 +73,7 @@ int pipe_is_enabled(struct intel_vgpu *vgpu, enum pipe pipe)
 	struct drm_i915_private *dev_priv = vgpu->gvt->dev_priv;
 
 	if (WARN_ON(pipe == INVALID_PIPE ||
-		    pipe >= INTEL_INFO(dev_priv)->num_pipes))
+		    pipe >= INTEL_NUM_PIPES(dev_priv)))
 		return -EINVAL;
 
 	if (vgpu_vreg_t(vgpu, PIPECONF(pipe)) & PIPECONF_ENABLE)
@@ -514,7 +514,7 @@ static void emulate_vblank_on_pipe(struct intel_vgpu *vgpu, int pipe)
 	};
 	int event;
 
-	if (pipe == INVALID_PIPE || pipe >= INTEL_INFO(dev_priv)->num_pipes)
+	if (pipe == INVALID_PIPE || pipe >= INTEL_NUM_PIPES(dev_priv))
 		return;
 
 	for_each_set_bit(event, irq->flip_done_event[pipe],
@@ -728,13 +728,13 @@ void intel_gvt_init_ddb(struct intel_gvt *gvt)
 
 	ddb_size = info->ddb_size;
 	ddb_size -= 4; /* 4 blocks for bypass path allocation */
-	pipe_size = ddb_size / info->num_pipes;
+	pipe_size = ddb_size / INTEL_NUM_PIPES(dev_priv);
 
 	for_each_pipe(dev_priv, pipe) {
 		pipe_info = &gvt->pipe_info[pipe];
 		memset(&pipe_info->ddb_y, 0, sizeof(pipe_info->ddb_y));
 		memset(&pipe_info->ddb_uv, 0, sizeof(pipe_info->ddb_uv));
-		start = pipe * ddb_size / info->num_pipes;
+		start = pipe * ddb_size / INTEL_NUM_PIPES(dev_priv);
 		end = start + pipe_size;
 
 		pipe_info->ddb_y[PLANE_CURSOR].start = end - 8;
@@ -771,7 +771,7 @@ static int intel_gvt_switch_pipe_owner(struct intel_gvt *gvt, enum pipe pipe,
 	bool valid_owner = false;
 	int id;
 
-	if (pipe == INVALID_PIPE || pipe >= INTEL_INFO(dev_priv)->num_pipes) {
+	if (pipe == INVALID_PIPE || pipe >= INTEL_NUM_PIPES(dev_priv)) {
 		gvt_err("Invalid PIPE_%c for new owner %d\n",
 			pipe_name(pipe), owner);
 		return -EINVAL;

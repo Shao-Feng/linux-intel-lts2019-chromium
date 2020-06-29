@@ -951,7 +951,7 @@ static int reg50080_mmio_write(struct intel_vgpu *vgpu,
 	if (plane == PLANE_PRIMARY)
 		vgpu_vreg_t(vgpu, PIPE_FLIPCOUNT_G4X(pipe))++;
 
-	if (pipe == INVALID_PIPE || pipe >= INTEL_INFO(dev_priv)->num_pipes) {
+	if (pipe == INVALID_PIPE || pipe >= INTEL_NUM_PIPES(dev_priv)) {
 		gvt_dbg_dpy("vgpu:%d: Invalid pipe and for reg_50080 offset:0x%x\n",
 			    vgpu->id, offset);
 		return 0;
